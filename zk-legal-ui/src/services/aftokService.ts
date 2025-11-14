@@ -61,7 +61,7 @@ export class AftokService {
    * Calculate revenue distribution for a project
    * Based on Aftok's time-weighted algorithm with depreciation
    */
-  async calculateRevenue Distribution(
+  async calculateRevenueDistribution(
     projectId: string,
     totalRevenue: number
   ): Promise<Map<string, number>> {

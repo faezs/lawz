@@ -1,0 +1,24 @@
+{
+  "private": true,
+  "devDependencies": {
+    "node-forge": ">=0.10.0",
+    "parcel-bundler": "^1.12.4",
+    "purescript": "^0.13.8",
+    "uuid-validate": "^0.0.3"
+  },
+  "scripts": {
+    "build": "spago build",
+    "copy-assets": "ln -sf ../dev/assets ./dist/",
+    "serve": "npm run copy-assets && parcel dev/index.html --open",
+    "build-dev": "mkdir -p prod && cp dev/index.html prod/ && spago bundle-app --to prod/index.js && parcel build prod/index.html --public-url /app/",
+    "build-prod": "mkdir -p prod && cp dev/index.html prod/ && rm -rf dist && spago bundle-app --to prod/index.js && parcel build prod/index.html --public-url /app/"
+  },
+  "dependencies": {
+    "big-integer": "^1.6.48",
+    "purty": "^6.3.0",
+    "qrious": "^4.0.2",
+    "spago": "^0.20.3",
+    "uuid": "8.3.0",
+    "uuid-validate": "0.0.3"
+  }
+}

@@ -2,12 +2,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
 import { DocumentType, DocumentStatus, TaxCalculationInput, MeansTestInput } from '@/types';
-import { taxCircuitService, meansTestCircuitService } from '@/services/zkProofService';
 import { FileText, Shield, Loader } from 'lucide-react';
 
 export function DocumentCreator() {
   const navigate = useNavigate();
-  const { addDocument, setLoading, setError } = useAppStore();
+  const { addDocument, setError } = useAppStore();
 
   const [selectedType, setSelectedType] = useState<DocumentType>(DocumentType.TAX_CALCULATION);
   const [taxInput, setTaxInput] = useState<TaxCalculationInput>({

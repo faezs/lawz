@@ -159,14 +159,14 @@ export class ZcashService {
   /**
    * Convert zatoshis to ZEC
    */
-  private toZEC(zatoshis: number): number {
-    return zatoshis / 100000000;
-  }
+  // private toZEC(zatoshis: number): number {
+  //   return zatoshis / 100000000;
+  // }
 
   /**
    * Get transaction status
    */
-  async getTransactionStatus(txId: string): Promise<'pending' | 'confirmed' | 'failed'> {
+  async getTransactionStatus(_txId: string): Promise<'pending' | 'confirmed' | 'failed'> {
     try {
       // In production, query transaction status from blockchain
       await new Promise(resolve => setTimeout(resolve, 500));

@@ -8,11 +8,11 @@ import { NADRACredentials } from '@/types';
  * For the hackathon, this is a mock implementation
  */
 export class NADRAService {
-  private readonly apiEndpoint: string;
+  // private readonly apiEndpoint: string;
   private authToken: string | null = null;
 
   constructor() {
-    this.apiEndpoint = import.meta.env.VITE_NADRA_API_ENDPOINT || '/api/nadra';
+    // this.apiEndpoint = import.meta.env.VITE_NADRA_API_ENDPOINT || '/api/nadra';
   }
 
   /**

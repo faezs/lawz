@@ -39,13 +39,16 @@ export function LoginPage() {
 
     try {
       // Convert CNIC to number (remove dashes)
-      const cnicNumber = BigInt(citizenId.replace(/-/g, ''));
+      // In production: const cnicNumber = BigInt(citizenId.replace(/-/g, ''));
+      citizenId.replace(/-/g, '');
 
       // Hash the fingerprint data
-      const fingerprintHash = BigInt('0x' + fingerprintData.slice(0, 16));
+      // In production: const fingerprintHash = BigInt('0x' + fingerprintData.slice(0, 16));
+      fingerprintData.slice(0, 16);
 
       // Generate random auth secret
-      const authSecret = BigInt(Math.floor(Math.random() * 1000000000));
+      // In production: const authSecret = BigInt(Math.floor(Math.random() * 1000000000));
+      Math.random();
 
       // Public inputs
       const timestamp = BigInt(Date.now());

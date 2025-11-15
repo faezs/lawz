@@ -4,6 +4,42 @@ This directory contains the zero-knowledge circuits used in the ZK Legal System.
 
 ## Circuits Overview
 
+### 0. NADRA Authentication Circuit (`nadra_auth/`) ⭐ NEW
+
+**Purpose**: Authenticate Pakistani citizens via NADRA biometric data without revealing the actual fingerprint hash or CNIC.
+
+**Inputs**:
+- Private: `cnicNumber`, `fingerprintHash`, `authSecret`
+- Public: `timestamp`, `challenge`, `authToken`, `isValid`
+
+**Circuit Logic**:
+```
+1. Validate CNIC is in valid range (13 digits)
+2. Hash CNIC with fingerprint using Poseidon
+3. Combine with auth secret
+4. Create authentication token with challenge and timestamp
+5. Output token and validity flag
+```
+
+**String Diagram Visualization**:
+The circuit is visualized as a string diagram in the UI, showing:
+- Private inputs (glowing purple): CNIC, Fingerprint, Secret
+- Public inputs (blue): Timestamp, Challenge
+- Operations (gray): Range validation, Poseidon hashes
+- Public outputs (green): Auth Token, Is Valid
+
+**Security Properties**:
+- Biometric data never leaves the user's device
+- Zero-knowledge proof of identity without revealing CNIC or fingerprint
+- Challenge-response prevents replay attacks
+- Poseidon hash ensures collision resistance
+
+**Files**:
+- `nadra_auth.circom` - Main circuit definition
+- Uses Poseidon hash and range comparators from circomlib
+
+---
+
 ### 1. Tax Calculation Circuit (`tax_calculation/`)
 
 **Purpose**: Prove that a tax calculation is correct without revealing actual income or deductions.

@@ -33,6 +33,13 @@
         final.haskell.lib.doJailbreak (pkg.overrideAttrs (_: {meta = {};}));
 
       dontCheck = pkg: final.haskell.lib.dontCheck pkg;
+
+      # On macOS, lrzhs has dylib path issues, so we use dontCheck to skip tests
+      # and add dontHaddock to avoid documentation build issues
+      fixLrzhs = pkg:
+        if final.stdenv.isDarwin
+        then final.haskell.lib.compose.dontCheck (final.haskell.lib.compose.dontHaddock pkg)
+        else pkg;
     in {
       #base16 = jailbreakUnbreak hprev.base16;
       #murmur3 = jailbreakUnbreak hprev.murmur3;
@@ -46,7 +53,14 @@
       dbmigrations = dbmigrations.defaultPackage;
       dbmigrations-postgresql-simple = dbmigrations-postgresql-simple.defaultPackage;
 
-      aftok = hfinal.callCabal2nix "aftok" ./. {};
+      # On macOS, disable zcash-orchard flag to avoid lrzhs dylib issues
+      aftok =
+        let
+          flags = if final.stdenv.isDarwin
+                  then { zcash-orchard = false; }
+                  else {};
+          base = hfinal.callCabal2nix "aftok" ./. {};
+        in dontCheck (final.haskell.lib.overrideCabal base (_: { configureFlags = final.lib.optionals final.stdenv.isDarwin ["-f-zcash-orchard"]; }));
     };
 
     overlay = final: prev: {
@@ -60,14 +74,19 @@
     } 
     // flake-utils.lib.eachDefaultSystem (
       system: let
+        # On macOS (Darwin), skip lrzhs overlay due to dylib path issues
+        # lrzhs is for Zcash Orchard support which is optional
+        lrzhsOverlay = if (builtins.match ".*-darwin" system) != null
+          then []
+          else [lrzhs.overlays.default];
+
         pkgs = import nixpkgs {
           inherit system;
           overlays = [
             overlay
             purescript-overlay.overlays.default
             bippy.overlays.default
-            lrzhs.overlays.default
-          ];
+          ] ++ lrzhsOverlay;
         };
       in {
         packages = {
@@ -90,9 +109,8 @@
             packages = _: [self.packages.${system}.aftok];
             buildInputs = [
               pkgs.cabal-install
-              lrzhs.packages.${system}.lrzhs_ffi
               pkgs.haskellPackages.ormolu
-            ];
+            ] ++ (if pkgs.stdenv.isDarwin then [] else [lrzhs.packages.${system}.lrzhs_ffi]);
             inputsFrom = builtins.attrValues self.packages.${system};
             withHoogle = true;
           };

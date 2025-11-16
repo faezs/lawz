@@ -47,7 +47,6 @@ common base-deps
     http-types >= 0.12.3 && < 0.13,
     iso8601-time >= 0.1.5 && < 0.2,
     lens >= 5.1.1 && < 5.2,
-    lrzhs >= 0.1,
     mtl >= 2.2.2 && < 2.3,
     network >= 3.1.2 && < 3.2,
     network-uri >= 2.6.4 && < 2.7,
@@ -77,6 +76,11 @@ common service-deps
     optparse-applicative >= 0.17.0 && < 0.18,
     -- wreq >= 0.5.4 && < 0.6,
 
+flag zcash-orchard
+  description: Enable Zcash Orchard support via lrzhs (requires Rust FFI, broken on macOS)
+  default: True
+  manual: True
+
 library
   import:             buildenv, base-deps
   hs-source-dirs:     lib
@@ -88,7 +92,6 @@ library
     Aftok.Currency.Bitcoin
     Aftok.Currency.Bitcoin.Payments
     Aftok.Currency.Bitcoin.Bip70
-    Aftok.Currency.Zcash
     Aftok.Currency.Zcash.Types
     Aftok.Currency.Zcash.Payments
     Aftok.Currency.Zcash.Zip321
@@ -131,6 +134,12 @@ library
     scientific >= 0.3.7 && < 0.4,
     semigroupoids >= 5.3.7 && < 5.4,
     uri-encode >= 1.5.0 && < 1.6,
+
+  if flag(zcash-orchard)
+    exposed-modules:
+      Aftok.Currency.Zcash
+    build-depends:
+      lrzhs >= 0.1
 
 Test-Suite spec
   import:             buildenv, base-deps

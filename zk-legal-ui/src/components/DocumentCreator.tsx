@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
 import { DocumentType, DocumentStatus, TaxCalculationInput, MeansTestInput } from '@/types';
-import { FileText, Shield, Loader } from 'lucide-react';
+import { FileText, Shield, Loader, Network } from 'lucide-react';
+import { fheService } from '@/services/fheService';
+import CircuitVisualizer from '@/components/CircuitVisualizer';
 
 export function DocumentCreator() {
   const navigate = useNavigate();
@@ -23,6 +25,7 @@ export function DocumentCreator() {
     dependents: 0,
   });
   const [isGeneratingProof, setIsGeneratingProof] = useState(false);
+  const [showCircuitVisualizer, setShowCircuitVisualizer] = useState(false);
 
   const handleGenerateProof = async () => {
     setIsGeneratingProof(true);
@@ -89,10 +92,22 @@ export function DocumentCreator() {
         };
       }
 
-      // Encrypt the actual document content
-      const encryptedContent = btoa(JSON.stringify(
-        selectedType === DocumentType.TAX_CALCULATION ? taxInput : meansTestInput
-      ));
+      // Initialize FHE encryption
+      await fheService.initialize();
+
+      // Encrypt the actual document content using FHE
+      const formData = selectedType === DocumentType.TAX_CALCULATION ? taxInput : meansTestInput;
+
+      // Encrypt each field individually using FHE
+      const encryptedFields = await fheService.encryptObject(formData);
+
+      // Serialize for storage
+      const encryptedContent = JSON.stringify(
+        Object.entries(encryptedFields).reduce((acc, [key, value]) => {
+          acc[key] = fheService.serializeEncrypted(value);
+          return acc;
+        }, {} as Record<string, string>)
+      );
 
       // Create document
       const document = {
@@ -263,15 +278,43 @@ export function DocumentCreator() {
           <div className="flex items-start space-x-3">
             <Shield className="w-5 h-5 text-purple-400 mt-0.5" />
             <div className="text-sm text-purple-300">
-              <p className="font-semibold mb-1">Zero-Knowledge Privacy</p>
+              <p className="font-semibold mb-1">FHE + Zero-Knowledge Privacy</p>
               <p>
-                Your sensitive financial data will be encrypted and only ZK proofs
-                will be generated. The proofs verify correctness without revealing
-                the actual values.
+                Your sensitive financial data is encrypted using <strong>Fully Homomorphic Encryption (FHE)</strong>,
+                allowing computations on encrypted data. Combined with <strong>Zero-Knowledge Proofs</strong>,
+                we verify correctness without ever revealing your actual values. View the circuit structure
+                to see the mathematical constraints ensuring legal compliance.
               </p>
             </div>
           </div>
         </div>
+
+        {/* Circuit Visualization Button */}
+        <button
+          onClick={() => setShowCircuitVisualizer(!showCircuitVisualizer)}
+          className="w-full mt-4 btn-secondary flex items-center justify-center space-x-2"
+        >
+          <Network className="w-5 h-5" />
+          <span>{showCircuitVisualizer ? 'Hide' : 'View'} Circuit Structure</span>
+        </button>
+
+        {/* Circuit Visualizer */}
+        {showCircuitVisualizer && (
+          <div className="mt-6 p-4 bg-gray-800 rounded-lg">
+            <CircuitVisualizer
+              circuitPath={`/circuits/${
+                selectedType === DocumentType.TAX_CALCULATION ? 'tax_calculation/tax_calculation' :
+                selectedType === DocumentType.MEANS_TEST ? 'means_test/means_test' :
+                'divorce_settlement/divorce_settlement'
+              }.circom`}
+              circuitName={
+                selectedType === DocumentType.TAX_CALCULATION ? 'Tax Calculation' :
+                selectedType === DocumentType.MEANS_TEST ? 'Means Test' :
+                'Divorce Settlement'
+              }
+            />
+          </div>
+        )}
 
         {/* Generate Button */}
         <button
@@ -284,12 +327,12 @@ export function DocumentCreator() {
           {isGeneratingProof ? (
             <>
               <Loader className="w-5 h-5 animate-spin" />
-              <span>Generating ZK Proof...</span>
+              <span>Generating FHE-Encrypted ZK Proof...</span>
             </>
           ) : (
             <>
               <Shield className="w-5 h-5" />
-              <span>Generate ZK Proof</span>
+              <span>Generate FHE-Encrypted ZK Proof</span>
             </>
           )}
         </button>

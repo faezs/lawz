@@ -1,0 +1,194 @@
+Description: Add Raast instant payment support with FHE encryption for privacy-preserving payment amounts
+Created: 2025-11-25 16:49:36 UTC
+Depends: 2021-02-07_02-43-08_account_detail 2021-01-31_23-40-41_project_first_revenue 2021-01-16_05-04-32_event-replacement 2021-01-03_16-15-52_auction-descriptions 2020-11-25_04-22-24_zcash-support 2020-09-14_23-27-54_users-account-recovery 2020-06-06_03-53-54_add-payment-networks 2017-09-24_22-06-01_billing-templates 2017-06-08_04-37-31_event-metadata-ids 2016-12-31_03-45-17_create-payments 2016-10-29_20-54-44_auction-timestamps 2016-10-14_02-49-36_event-amendments 2016-10-14_02-14-09_create_invitations 2016-10-14_02-11-24_project_companions_invitations 2016-10-13_05-36-55_user-event-log
+Apply: |
+  -- Add PKR (Pakistani Rupee) to currency enum
+  ALTER TYPE currency_t ADD VALUE IF NOT EXISTS 'PKR';
+
+  -- Create table for Raast payment accounts with FHE support
+  CREATE TABLE IF NOT EXISTS raast_accounts (
+    id uuid primary key default uuid_generate_v4(),
+    user_id uuid references users(id) not null,
+    currency currency_t not null DEFAULT 'PKR',
+
+    -- Raast/IBAN identifiers
+    iban text not null,
+    raast_id text,
+    bank_code text not null,
+    account_title text not null,
+
+    -- FHE cryptographic keys for homomorphic encryption
+    fhe_public_key text not null,
+    fhe_secret_key_encrypted text,  -- Encrypted with user's master key
+    fhe_scheme_type text not null DEFAULT 'TFHE',  -- TFHE, BFV, BGV, CKKS
+    fhe_key_id uuid not null default uuid_generate_v4(),
+
+    -- Metadata
+    is_primary bool DEFAULT false,
+    is_verified bool DEFAULT false,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+
+    -- Constraints
+    UNIQUE (user_id, iban),
+    UNIQUE (user_id, currency, is_primary),
+    CHECK (currency = 'PKR'),
+    CHECK (length(iban) >= 24 AND length(iban) <= 34),  -- IBAN standard length
+    CHECK (iban ~ '^PK[0-9]{2}[A-Z0-9]+$')  -- Pakistani IBAN format: PK + 2 check digits + bank code + account
+  );
+
+  -- Create index for faster lookups
+  CREATE INDEX IF NOT EXISTS idx_raast_accounts_user_id ON raast_accounts(user_id);
+  CREATE INDEX IF NOT EXISTS idx_raast_accounts_iban ON raast_accounts(iban);
+  CREATE INDEX IF NOT EXISTS idx_raast_accounts_fhe_key_id ON raast_accounts(fhe_key_id);
+
+  -- Create table for FHE encrypted payment amounts (semiring operations)
+  CREATE TABLE IF NOT EXISTS fhe_encrypted_amounts (
+    id uuid primary key default uuid_generate_v4(),
+
+    -- Reference to payment or work event
+    payment_id uuid,
+    work_event_id uuid references work_events(id),
+    billable_id uuid references billables(id),
+
+    -- FHE encrypted ciphertext (stored as base64 encoded bytes)
+    ciphertext text not null,
+    fhe_key_id uuid not null,
+    fhe_scheme_type text not null DEFAULT 'TFHE',
+
+    -- ZK proof hash for validation dispatch
+    zk_proof_hash text,  -- SHA256 hash of the ZK proof
+    zk_proof_verified bool DEFAULT false,
+
+    -- Homomorphic operation metadata
+    operation_type text,  -- 'base', 'add', 'mul', 'aggregate'
+    parent_ciphertexts uuid[],  -- For tracking semiring operations
+
+    -- Metadata
+    created_at timestamptz not null default now(),
+
+    -- Constraints
+    CHECK (payment_id IS NOT NULL OR work_event_id IS NOT NULL OR billable_id IS NOT NULL),
+    CHECK (fhe_scheme_type IN ('TFHE', 'BFV', 'BGV', 'CKKS'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_fhe_amounts_payment ON fhe_encrypted_amounts(payment_id);
+  CREATE INDEX IF NOT EXISTS idx_fhe_amounts_work_event ON fhe_encrypted_amounts(work_event_id);
+  CREATE INDEX IF NOT EXISTS idx_fhe_amounts_key ON fhe_encrypted_amounts(fhe_key_id);
+
+  -- Create table for Raast payment requests
+  CREATE TABLE IF NOT EXISTS raast_payment_requests (
+    id uuid primary key default uuid_generate_v4(),
+    payment_request_id uuid references payment_requests(id),
+
+    -- Raast payment details
+    sender_iban text not null,
+    recipient_iban text not null,
+    sender_raast_id text,
+    recipient_raast_id text,
+
+    -- Encrypted amount using FHE
+    encrypted_amount_id uuid references fhe_encrypted_amounts(id),
+
+    -- Payment purpose and metadata
+    purpose_code text,  -- Raast purpose codes (e.g., '001' for person-to-person)
+    payment_narrative text,
+
+    -- ZK proof for compliance (dispatch layer)
+    zk_proof_json jsonb,  -- Complete ZK proof
+    zk_verified bool DEFAULT false,
+
+    -- Request status
+    status text not null DEFAULT 'pending',  -- pending, verified, submitted, completed, failed
+    raast_transaction_id text,  -- Raast system transaction ID
+
+    -- Timestamps
+    created_at timestamptz not null default now(),
+    expires_at timestamptz,
+    submitted_at timestamptz,
+    completed_at timestamptz,
+
+    -- Constraints
+    CHECK (status IN ('pending', 'verified', 'submitted', 'completed', 'failed', 'expired'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_raast_payment_requests_payment ON raast_payment_requests(payment_request_id);
+  CREATE INDEX IF NOT EXISTS idx_raast_payment_requests_status ON raast_payment_requests(status);
+  CREATE INDEX IF NOT EXISTS idx_raast_payment_requests_transaction ON raast_payment_requests(raast_transaction_id);
+
+  -- Create table for Raast payment confirmations
+  CREATE TABLE IF NOT EXISTS raast_payments (
+    id uuid primary key default uuid_generate_v4(),
+    payment_id uuid references payments(id),
+    raast_payment_request_id uuid references raast_payment_requests(id) not null,
+
+    -- Raast confirmation details
+    raast_transaction_id text not null,
+    raast_reference_number text,
+    bank_reference_number text,
+
+    -- Settlement details
+    settlement_date timestamptz,
+    settlement_amount_encrypted_id uuid references fhe_encrypted_amounts(id),
+
+    -- Status
+    status text not null DEFAULT 'confirmed',  -- confirmed, settled, reconciled, disputed
+
+    -- Timestamps
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+
+    -- Constraints
+    CHECK (status IN ('confirmed', 'settled', 'reconciled', 'disputed')),
+    UNIQUE (raast_transaction_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_raast_payments_payment ON raast_payments(payment_id);
+  CREATE INDEX IF NOT EXISTS idx_raast_payments_request ON raast_payments(raast_payment_request_id);
+  CREATE INDEX IF NOT EXISTS idx_raast_payments_transaction ON raast_payments(raast_transaction_id);
+
+  -- Add Raast account reference to cryptocurrency_accounts for unified account management
+  ALTER TABLE cryptocurrency_accounts ADD COLUMN IF NOT EXISTS raast_account_id uuid references raast_accounts(id);
+
+  -- Update billables to support PKR currency
+  -- (Already supports currency_t which now includes PKR)
+
+  -- Create view for unified account display (crypto + fiat)
+  CREATE OR REPLACE VIEW all_payment_accounts AS
+    SELECT
+      ca.id,
+      ca.user_id,
+      ca.currency,
+      ca.btc_addr as address,
+      null as iban,
+      'crypto' as account_type,
+      ca.is_primary,
+      null as fhe_key_id
+    FROM cryptocurrency_accounts ca
+    WHERE ca.currency IN ('BTC', 'ZEC')
+    UNION ALL
+    SELECT
+      ra.id,
+      ra.user_id,
+      ra.currency,
+      null as address,
+      ra.iban,
+      'raast' as account_type,
+      ra.is_primary,
+      ra.fhe_key_id
+    FROM raast_accounts ra;
+
+  -- Add trigger to update updated_at timestamp
+  CREATE OR REPLACE FUNCTION update_updated_at_column()
+  RETURNS TRIGGER AS $$
+  BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+  END;
+  $$ language 'plpgsql';
+
+  CREATE TRIGGER update_raast_accounts_updated_at BEFORE UPDATE ON raast_accounts
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+  CREATE TRIGGER update_raast_payments_updated_at BEFORE UPDATE ON raast_payments
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

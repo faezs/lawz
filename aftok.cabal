@@ -88,6 +88,10 @@ library
     Aftok.Currency.Bitcoin
     Aftok.Currency.Bitcoin.Payments
     Aftok.Currency.Bitcoin.Bip70
+    Aftok.Currency.Raast
+    Aftok.Currency.Raast.Types
+    Aftok.Currency.Raast.FHE
+    Aftok.Currency.Raast.Payments
     Aftok.Currency.Zcash
     Aftok.Currency.Zcash.Types
     Aftok.Currency.Zcash.Payments

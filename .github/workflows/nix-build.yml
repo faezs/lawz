@@ -36,12 +36,24 @@ jobs:
             max-jobs = auto
             cores = 0
 
-      - name: Set up Cachix
+      - name: Set up Cachix (optional)
+        if: ${{ secrets.CACHIX_AUTH_TOKEN != '' }}
         uses: cachix/cachix-action@v14
         with:
           name: aftok
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
           skipPush: ${{ github.event_name == 'pull_request' }}
+
+      - name: Cache Nix store (free alternative)
+        if: ${{ secrets.CACHIX_AUTH_TOKEN == '' }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/nix
+            /nix/store
+          key: nix-${{ runner.os }}-${{ hashFiles('flake.lock') }}
+          restore-keys: |
+            nix-${{ runner.os }}-
 
       - name: Check Nix flake
         run: nix flake check --show-trace
@@ -88,12 +100,25 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = true
 
-      - name: Set up Cachix
+      - name: Set up Cachix (optional)
+        if: ${{ secrets.CACHIX_AUTH_TOKEN != '' }}
         uses: cachix/cachix-action@v14
         with:
           name: aftok
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
           skipPush: true
+
+      - name: Cache Nix store (free alternative)
+        if: ${{ secrets.CACHIX_AUTH_TOKEN == '' }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/nix
+            /nix/store
+          key: nix-devshell-${{ matrix.shell }}-${{ hashFiles('flake.lock') }}
+          restore-keys: |
+            nix-devshell-${{ matrix.shell }}-
+            nix-devshell-
 
       - name: Test ${{ matrix.shell }} development shell
         run: |

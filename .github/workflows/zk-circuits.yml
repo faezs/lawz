@@ -1,0 +1,291 @@
+name: ZK Circuits Testing
+
+on:
+  push:
+    paths:
+      - 'circuits/**'
+      - '.github/workflows/zk-circuits.yml'
+  pull_request:
+    paths:
+      - 'circuits/**'
+
+jobs:
+  compile-circuits:
+    name: Compile and Test ZK Circuits
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache Circom installation
+        uses: actions/cache@v4
+        id: circom-cache
+        with:
+          path: /usr/local/bin/circom
+          key: circom-v2.1.6-${{ runner.os }}
+
+      - name: Install Circom
+        if: steps.circom-cache.outputs.cache-hit != 'true'
+        run: |
+          wget https://github.com/iden3/circom/releases/download/v2.1.6/circom-linux-amd64
+          chmod +x circom-linux-amd64
+          sudo mv circom-linux-amd64 /usr/local/bin/circom
+
+      - name: Verify Circom installation
+        run: circom --version
+
+      - name: Install snarkjs
+        run: npm install -g snarkjs@0.7.3
+
+      - name: Compile Raast payment circuit
+        working-directory: ./circuits/raast_payment
+        run: |
+          echo "Compiling raast_payment.circom..."
+          circom raast_payment.circom --r1cs --wasm --sym --c --O2
+
+      - name: Generate circuit statistics
+        working-directory: ./circuits/raast_payment
+        run: |
+          if [ -f raast_payment.r1cs ]; then
+            echo "===== Circuit Info ====="
+            snarkjs r1cs info raast_payment.r1cs | tee circuit_info.txt
+
+            echo ""
+            echo "===== Constraint Count ====="
+            snarkjs r1cs print raast_payment.r1cs raast_payment.sym | wc -l
+
+            echo ""
+            echo "===== Circuit Compilation Success ====="
+            ls -lh raast_payment.r1cs raast_payment_js/raast_payment.wasm
+          else
+            echo "ERROR: Circuit compilation failed - no .r1cs file generated"
+            exit 1
+          fi
+
+      - name: Download Powers of Tau
+        working-directory: ./circuits/raast_payment
+        run: |
+          # Download small powers of tau for testing
+          wget -q https://hermez.s3-eu-west-1.amazonaws.com/powersOfTau28_hez_final_14.ptau
+
+      - name: Generate proving key
+        working-directory: ./circuits/raast_payment
+        run: |
+          echo "Setting up Groth16 proving system..."
+          snarkjs groth16 setup raast_payment.r1cs powersOfTau28_hez_final_14.ptau raast_payment_0000.zkey
+
+          echo "Contributing to ceremony..."
+          echo "test entropy" | snarkjs zkey contribute raast_payment_0000.zkey raast_payment_final.zkey --name="Test Contributor"
+
+          echo "Exporting verification key..."
+          snarkjs zkey export verificationkey raast_payment_final.zkey verification_key.json
+
+          echo "Verification key generated:"
+          cat verification_key.json
+
+      - name: Create test witness
+        working-directory: ./circuits/raast_payment
+        run: |
+          # Create test input
+          cat > input.json <<EOF
+          {
+            "amount": "50000",
+            "senderIBAN": "1234567890",
+            "recipientIBAN": "9876543210",
+            "dailyTotal": "100000",
+            "salt": "42",
+            "minAmount": "1",
+            "maxAmount": "100000000",
+            "dailyLimit": "500000000"
+          }
+          EOF
+
+          echo "Test input created:"
+          cat input.json
+
+          echo "Calculating witness..."
+          node raast_payment_js/generate_witness.js \
+            raast_payment_js/raast_payment.wasm \
+            input.json \
+            witness.wtns
+
+          echo "Witness generated successfully!"
+
+      - name: Generate and verify proof
+        working-directory: ./circuits/raast_payment
+        run: |
+          echo "Generating Groth16 proof..."
+          snarkjs groth16 prove \
+            raast_payment_final.zkey \
+            witness.wtns \
+            proof.json \
+            public.json
+
+          echo "Proof generated:"
+          cat proof.json
+
+          echo ""
+          echo "Public inputs:"
+          cat public.json
+
+          echo ""
+          echo "Verifying proof..."
+          snarkjs groth16 verify \
+            verification_key.json \
+            public.json \
+            proof.json
+
+          if [ $? -eq 0 ]; then
+            echo "✅ Proof verification SUCCESSFUL!"
+          else
+            echo "❌ Proof verification FAILED!"
+            exit 1
+          fi
+
+      - name: Export Solidity verifier
+        working-directory: ./circuits/raast_payment
+        run: |
+          echo "Exporting Solidity verifier contract..."
+          snarkjs zkey export solidityverifier \
+            raast_payment_final.zkey \
+            RaastPaymentVerifier.sol
+
+          echo "Solidity verifier generated:"
+          head -20 RaastPaymentVerifier.sol
+
+      - name: Upload circuit artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zk-circuit-artifacts
+          path: |
+            circuits/raast_payment/*.r1cs
+            circuits/raast_payment/*.wasm
+            circuits/raast_payment/*.sym
+            circuits/raast_payment/*.zkey
+            circuits/raast_payment/verification_key.json
+            circuits/raast_payment/proof.json
+            circuits/raast_payment/public.json
+            circuits/raast_payment/RaastPaymentVerifier.sol
+            circuits/raast_payment/circuit_info.txt
+          retention-days: 30
+
+      - name: Comment on PR with circuit stats
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const circuitInfo = fs.readFileSync('circuits/raast_payment/circuit_info.txt', 'utf8');
+
+            const comment = `## 🔐 ZK Circuit Compilation Report
+
+            ### Raast Payment Validation Circuit
+
+            \`\`\`
+            ${circuitInfo}
+            \`\`\`
+
+            ### Test Results
+            ✅ Circuit compiled successfully
+            ✅ Proving key generated
+            ✅ Test proof generated and verified
+
+            ### Artifacts
+            - Constraint system (R1CS)
+            - WebAssembly witness calculator
+            - Groth16 proving key
+            - Verification key
+            - Solidity verifier contract
+
+            [View full artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  benchmark-circuits:
+    name: Benchmark ZK Proofs
+    runs-on: ubuntu-latest
+    needs: compile-circuits
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download circuit artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: zk-circuit-artifacts
+          path: circuits/raast_payment/
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install snarkjs
+        run: npm install -g snarkjs@0.7.3
+
+      - name: Benchmark proof generation
+        working-directory: ./circuits/raast_payment
+        run: |
+          echo "Benchmarking proof generation (10 iterations)..."
+
+          for i in {1..10}; do
+            START=$(date +%s%3N)
+
+            node raast_payment_js/generate_witness.js \
+              raast_payment_js/raast_payment.wasm \
+              input.json \
+              witness_bench.wtns
+
+            snarkjs groth16 prove \
+              raast_payment_final.zkey \
+              witness_bench.wtns \
+              proof_bench.json \
+              public_bench.json \
+              > /dev/null 2>&1
+
+            END=$(date +%s%3N)
+            DURATION=$((END - START))
+
+            echo "Iteration $i: ${DURATION}ms"
+          done
+
+      - name: Benchmark proof verification
+        working-directory: ./circuits/raast_payment
+        run: |
+          echo "Benchmarking proof verification (100 iterations)..."
+
+          TOTAL=0
+          for i in {1..100}; do
+            START=$(date +%s%3N)
+
+            snarkjs groth16 verify \
+              verification_key.json \
+              public.json \
+              proof.json \
+              > /dev/null 2>&1
+
+            END=$(date +%s%3N)
+            DURATION=$((END - START))
+            TOTAL=$((TOTAL + DURATION))
+
+            if [ $((i % 10)) -eq 0 ]; then
+              echo "Completed $i iterations..."
+            fi
+          done
+
+          AVERAGE=$((TOTAL / 100))
+          echo "Average verification time: ${AVERAGE}ms"
+          echo "Total 100 verifications: ${TOTAL}ms"
